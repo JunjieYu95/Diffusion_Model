@@ -23,7 +23,7 @@ grandparent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 # Add the grandparent directory to sys.path
 sys.path.insert(0, grandparent_dir)
 
-from utility import Plume2D_dataloader
+from utility import fluvial_dataloader
 from viz import show_generated_samples
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -51,12 +51,12 @@ def monitoring(losses, net, save_folder='monitor', epoch=None):
 
     # Losses
     axs[0].plot(losses)
-    axs[0].set_ylim(0, 0.1)
+    # axs[0].set_ylim(0, 0.1)
     axs[0].set_title('Loss over time')
 
     # Samples
     n_steps = 40
-    x = torch.rand(64, 1, 32, 32).to(device)
+    x = torch.rand(64, 1, 64, 64).to(device)
     print('x.shape:', x.shape)
     for i in range(n_steps):
         noise_amount = torch.ones((x.shape[0], )).to(device) * (1-(i/n_steps)) # Starting high going low
@@ -79,14 +79,14 @@ def monitoring(losses, net, save_folder='monitor', epoch=None):
 
 
 # load the MNIST dataset
-train_dataloader = Plume2D_dataloader(batch_size = 32)
+train_dataloader = fluvial_dataloader(batch_size = 32)
 
 # How many runs through the data should we do?
 n_epochs = 20
 
 # Create the network
 net = UNet2DModel(
-    sample_size=(20,68),  # the target image resolution
+    sample_size=(64,64),  # the target image resolution
     in_channels=1,  # the number of input channels, 3 for RGB images
     out_channels=1,  # the number of output channels
     layers_per_block=2,  # how many ResNet layers to use per UNet block
@@ -148,8 +148,6 @@ for epoch in range(n_epochs):
     # Print our the average of the loss values for this epoch:
     avg_loss = sum(losses[-len(train_dataloader):])/len(train_dataloader)
     print(f'Finished epoch {epoch}. Average loss for this epoch: {avg_loss:05f}')
-
-
 
 
 

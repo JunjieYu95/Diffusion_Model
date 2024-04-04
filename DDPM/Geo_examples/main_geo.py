@@ -23,7 +23,7 @@ grandparent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 # Add the grandparent directory to sys.path
 sys.path.insert(0, grandparent_dir)
 
-from utility import fluvial_dataloader
+from utility import fluvial_dataloader, sis_dataloader
 from viz import show_generated_samples
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -31,7 +31,7 @@ print(f'Using device: {device}')
 
 def corrupt(x, amount):
   """Corrupt the input `x` by mixing it with noise according to `amount`"""
-  noise = torch.rand_like(x)
+  noise = torch.randn_like(x)
   amount = amount.view(-1, 1, 1, 1) # Sort shape so broadcasting works
   return x*(1-amount) + noise*amount
 
@@ -56,8 +56,7 @@ def monitoring(losses, net, save_folder='monitor', epoch=None):
 
     # Samples
     n_steps = 40
-    x = torch.rand(64, 1, 64, 64).to(device)
-    print('x.shape:', x.shape)
+    x = torch.randn(64, 1, 64, 64).to(device)
     for i in range(n_steps):
         noise_amount = torch.ones((x.shape[0], )).to(device) * (1-(i/n_steps)) # Starting high going low
         with torch.no_grad():
@@ -65,7 +64,6 @@ def monitoring(losses, net, save_folder='monitor', epoch=None):
         mix_factor = 1/(n_steps - i)
         x = x*(1-mix_factor) + pred*mix_factor
 
-    print('pred x.shape:', x.shape)
     # shift value from [-1, 1] to [0, 1]
     x = (x + 1) / 2
     axs[1].imshow(torchvision.utils.make_grid(x.detach().cpu().clip(0, 1), 
@@ -76,13 +74,15 @@ def monitoring(losses, net, save_folder='monitor', epoch=None):
     # save the figure
     if epoch is not None:
         fig.savefig(f'{save_folder}/epoch_{epoch}.png')
+    # close the figure
+    plt.close(fig)
 
 
 # load the MNIST dataset
 train_dataloader = fluvial_dataloader(batch_size = 32)
 
 # How many runs through the data should we do?
-n_epochs = 20
+n_epochs = 40
 
 # Create the network
 net = UNet2DModel(
@@ -113,6 +113,7 @@ opt = torch.optim.Adam(net.parameters(), lr=1e-3)
 # Keeping a record of the losses for later viewing
 losses = []
 
+# 
 # The training loop
 for epoch in range(n_epochs):
 
@@ -120,7 +121,7 @@ for epoch in range(n_epochs):
 
         # Get some data and prepare the corrupted version
         x = x.to(device) # Data on the GPU
-        noise_amount = torch.rand(x.shape[0]).to(device) # Pick random noise amounts
+        noise_amount = torch.randn(x.shape[0]).to(device) # Pick random noise amounts
         noisy_x = corrupt(x, noise_amount) # Create our noisy x
 
         # Get the model prediction
@@ -142,13 +143,18 @@ for epoch in range(n_epochs):
     if epoch % every_epoch == 0:
         print(f'Loss: {loss.item()}')
         # save the monitoring figure
-        monitoring(losses, net, save_folder='monitor', epoch=epoch)
+        monitoring(losses, net, save_folder='monitor_channel_gaussian', epoch=epoch)
 
 
     # Print our the average of the loss values for this epoch:
     avg_loss = sum(losses[-len(train_dataloader):])/len(train_dataloader)
     print(f'Finished epoch {epoch}. Average loss for this epoch: {avg_loss:05f}')
 
-
+# save the model
+# create a folder to save the model
+trained_model_folder = 'trained_model'
+if not os.path.exists(trained_model_folder):
+    os.makedirs(trained_model_folder)
+torch.save(net.state_dict(), f'{trained_model_folder}/model_channel_gaussian.pth')
 
 

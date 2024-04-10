@@ -25,7 +25,7 @@ def mnist_dataloader(batch_size=16, shuffle=True, num_workers=1):
 
 # createa a dataloader from geo_dataset
 def Plume2D_dataloader(batch_size=16, shuffle=True, num_workers=1):
-    file = './geo_dataset/CO2_plume_vertical_2D_random.pt'
+    file = '/scratch1/junjieyu/Diffusion_Model/geo_dataset/CO2_plume_vertical_2D_random.pt'
     # Load the dataset using torch.load
     dataset = torch.load(file)
     # add a channel dimension
@@ -38,7 +38,7 @@ def Plume2D_dataloader(batch_size=16, shuffle=True, num_workers=1):
     return dataloader
 
 def sis_dataloader(batch_size=16, shuffle=True, num_workers=1):
-    file = './geo_dataset/uncond-sis-train.pt'
+    file = '/scratch1/junjieyu/Diffusion_Model/geo_dataset/uncond-sis-train.pt'
     # Load the dataset using torch.load
     dataset = torch.load(file)
     # shift the range to [-1,1]
@@ -49,7 +49,7 @@ def sis_dataloader(batch_size=16, shuffle=True, num_workers=1):
     return dataloader
 
 def fluvial_dataloader(batch_size=16, shuffle=True, num_workers=1):
-    file = './geo_dataset/fluvial-train.pt'
+    file = '/scratch1/junjieyu/Diffusion_Model/geo_dataset/fluvial-train.pt'
     # Load the dataset using torch.load
     dataset = torch.load(file)
     # shift the range to [-1,1]
@@ -132,9 +132,9 @@ def show_3d_mask(mask):
     ax.voxels(mask, edgecolor='k')
     plt.show()
 
-def patched_mask(image, percentage, patch_size = (5,5)):
-    image_size = image.shape
-    mask = np.ones(image_size, dtype=int)
+def patched_mask(shape, percentage, patch_size = (5,5)):
+    image_size = shape
+    mask = np.zeros(image_size, dtype=int)
     patch_rows, patch_cols = patch_size
 
     num_patches = int((image_size[0] / patch_rows) * (image_size[1] / patch_cols))
@@ -145,6 +145,8 @@ def patched_mask(image, percentage, patch_size = (5,5)):
     for idx in patch_indices:
         i = (idx // (image_size[1] // patch_cols)) * patch_rows
         j = (idx % (image_size[1] // patch_cols)) * patch_cols
-        mask[i:i+patch_rows, j:j+patch_cols] = 0
+        mask[i:i+patch_rows, j:j+patch_cols] = 1
 
+    mask = torch.tensor(mask.copy())
+    mask = mask.unsqueeze(0).unsqueeze(0)
     return mask

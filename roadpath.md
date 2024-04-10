@@ -122,4 +122,77 @@ let's learn how Git branch works -> done
 
 following the note book I got good answer.
 
+note:
+scale issue: [-1,1], [0,1]
+initial issue: rand vs randn
+generation issue: follow the notebook or follow the default inference
+
+explore:
+why I can generate different dimension when I set the output dimension is (20,68)
+e.g. I can generate 100*100 image like this ![flexible_100_100](roadpath_images/flexible_100_100.png)
+
+for channel dataset. (64,64) -> (32,32)
+![channel](roadpath_images/channel_100_100.png)
+
+I think I found the reason, because the unet is all operated by CNN and there is no flatten operation, so the output dimension is not fixed, because all the learnable parameters are assigned within kernel.
+
+Now the intereting question is, how the pattern is change when the output dimension is changed.
+
+# 2024.4.2
+
+Get results:
+
+note:
+1) the notebook is for motivation, for example:
+   a. it use rand instead of randn
+   b. it minimize the mismatch between image instead of noise
+   c. it iteratively add noise using f for loop
+
+The more stable version should be following the DDPM pipeline, but I get background scale issue.
+Why this issue not happen in the notebook appraoch?
+
+2) Need to check:
+   1) what's the input output, we I use net.sample, what is predicted
+   2) if I want to access the predicted noise, how to do it
+
+# 2024.4.3
+compare the package with the notebook,
+
+# 2024.4.4
+Now I understand the diffuser package better, it turns out the appraoch I use is correct, since I can train reasonable model on MNIST dataset.
+![alt text](roadpath_images/MNIST_good.png)
+
+which means there is no fundamental issue with my appraoch, I may need to perform severl experiments to find the best hyperparameters.
+
+Question:
+It seems turns out minimize mismatch between clean image and denoised image perform better than minimize mismatch between noise and predicted noise in my Plume case, is there any reason for this?
+
+Is it possible because 
+
+Damn: I found it, just epoch is not enough.
+
+next step:
+1) train model on geo dataset
+2) test and get results of repainting on plume dataset
+
+# 2024.4.7
+Test the performance of repaint algorithm.
+
+Observation: the performance of repaint
+patch_based_mask > ray path > random pixel
+
+test:
+1) patch_based_mask
+   a. different pacth size
+   b. fifferent mask ratio
+
+# 2024.4.9
+sensitivity of the n_jump
+20
+![20](<DDPM/Geo_examples/repaint_patch_folder/jump_n_20_patch_size_(3, 3)_mask_ratio_0.02.png>)
+10
+![10](<DDPM/Geo_examples/repaint_patch_folder/jump_n_10_patch_size_(3, 3)_mask_ratio_0.02.png>)
+5
+![5](<DDPM/Geo_examples/repaint_patch_folder/jump_n_5_patch_size_(3, 3)_mask_ratio_0.02.png>)
+
 

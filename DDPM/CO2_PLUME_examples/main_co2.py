@@ -1,14 +1,9 @@
-'''
-this file reproduce the training process from
-https://github.com/alirezadir/Machine-Learning-Interviews/blob/main/src/MLSD/ml-system-design.md
-'''
-
 import torch
 import torchvision
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from diffusers import DDPMScheduler, UNet2DModel
+from diffusers import DDPMScheduler, UNet2DModel, DDPMPipeline
 from matplotlib import pyplot as plt
 import os
 import glob
@@ -26,63 +21,12 @@ sys.path.insert(0, grandparent_dir)
 from utility import Plume2D_dataloader
 from viz import show_generated_samples
 
+
+train_dataloader = Plume2D_dataloader(batch_size = 16)
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f'Using device: {device}')
-
-def corrupt(x, amount):
-  """Corrupt the input `x` by mixing it with noise according to `amount`"""
-  noise = torch.rand_like(x)
-  amount = amount.view(-1, 1, 1, 1) # Sort shape so broadcasting works
-  return x*(1-amount) + noise*amount
-
-def monitoring(losses, net, save_folder='monitor', epoch=None):
-
-    # check if the folder exists, if exists, clear it. if not, create it
-    if not os.path.exists(save_folder):
-        os.makedirs(save_folder)
-    else:
-        if epoch == 0:
-            files = glob.glob(f'{save_folder}/*')
-            for f in files:
-                os.remove(f)
-
-    # Plot losses and some samples
-    fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-
-    # Losses
-    axs[0].plot(losses)
-    axs[0].set_ylim(0, 0.1)
-    axs[0].set_title('Loss over time')
-
-    # Samples
-    n_steps = 40
-    x = torch.rand(64, 1, 32, 32).to(device)
-    print('x.shape:', x.shape)
-    for i in range(n_steps):
-        noise_amount = torch.ones((x.shape[0], )).to(device) * (1-(i/n_steps)) # Starting high going low
-        with torch.no_grad():
-            pred = net(x, 0).sample
-        mix_factor = 1/(n_steps - i)
-        x = x*(1-mix_factor) + pred*mix_factor
-
-    print('pred x.shape:', x.shape)
-    # shift value from [-1, 1] to [0, 1]
-    x = (x + 1) / 2
-    axs[1].imshow(torchvision.utils.make_grid(x.detach().cpu().clip(0, 1), 
-                                              nrow=8,
-                                              padding=1, pad_value=1)[0], cmap='plasma')
-    axs[1].set_title('Generated Samples')
-
-    # save the figure
-    if epoch is not None:
-        fig.savefig(f'{save_folder}/epoch_{epoch}.png')
-
-
-# load the MNIST dataset
-train_dataloader = Plume2D_dataloader(batch_size = 32)
-
-# How many runs through the data should we do?
-n_epochs = 20
 
 # Create the network
 net = UNet2DModel(
@@ -104,53 +48,95 @@ net = UNet2DModel(
 ) #<<<
 net.to(device)
 
-# Our loss finction
-loss_fn = nn.MSELoss()
+# setup training configuration
+class TrainingConfig():
+    eval_batch_size = 16  # how many images to sample during evaluation
+    num_epochs = 100
+    gradient_accumulation_steps = 1
+    learning_rate = 1e-5
+    lr_warmup_steps = 500
+    save_image_epochs = 10
+    save_model_epochs = 10
+    mixed_precision = "fp16"  # `no` for float32, `fp16` for automatic mixed precision
+    overwrite_output_dir = True  # overwrite the old model when re-running the notebook
+    seed = 0
+config = TrainingConfig()
 
-# The optimizer
-opt = torch.optim.Adam(net.parameters(), lr=1e-3) 
+# evalution during training
+def evaluate(config, epoch, pipeline, losses):
+    # Sample some images from random noise (this is the backward diffusion process).
+    # The default pipeline output type is `List[PIL.Image]`
+    
+    images = pipeline(
+        batch_size=config.eval_batch_size,
+        generator=torch.manual_seed(config.seed),
+        output_type = 'numpy',
+        num_inference_steps = 1000
+    ).images
 
-# Keeping a record of the losses for later viewing
+    # Show the images
+    fig = show_generated_samples(images, ncols=4)
+
+    # Save the images
+    test_dir = os.path.join("monitor")
+    os.makedirs(test_dir, exist_ok=True)
+    
+    fig.savefig(os.path.join(test_dir, f"epoch_{epoch}.png"))
+
+    # losses figure
+    fig, ax = plt.subplots()
+    ax.plot(losses)
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training Loss")
+    fig.savefig(os.path.join(test_dir, f"losses.png"))
+
+# setup optimizer and scheduler
+from diffusers.optimization import get_cosine_schedule_with_warmup
+optimizer = torch.optim.Adam(net.parameters(), lr=1e-3) 
+noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
+
 losses = []
+# train the model
+for epoch in range(config.num_epochs):
+    for batch in train_dataloader:
+        clean_images = batch
+        clean_images = clean_images.to(device)
+        noise = torch.randn(clean_images.shape, device=clean_images.device)
+        bs = clean_images.shape[0]
 
-# The training loop
-for epoch in range(n_epochs):
+        # Sample a random timestep for each image
+        timesteps = torch.randint(
+            0, noise_scheduler.config.num_train_timesteps, (bs,), device=clean_images.device,
+            dtype=torch.int64
+        )
+        # timesteps = torch.tensor([0]*bs)
+        # timesteps = timesteps.to(device)
+        # print('timesteps2',timesteps.shape)
+        # Add noise to the clean images according to the noise magnitude at each timestep
+                # (this is the forward diffusion process)
+        noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
+        noise_pred = net(noisy_images, timesteps, return_dict=False)[0]
 
-    for x in train_dataloader:
-
-        # Get some data and prepare the corrupted version
-        x = x.to(device) # Data on the GPU
-        noise_amount = torch.rand(x.shape[0]).to(device) # Pick random noise amounts
-        noisy_x = corrupt(x, noise_amount) # Create our noisy x
-
-        # Get the model prediction
-        pred = net(noisy_x, 0).sample #<<< Using timestep 0 always, adding .sample
-
-        # Calculate the loss
-        loss = loss_fn(pred, x) # How close is the output to the true 'clean' x?
-
-        # Backprop and update the params:
-        opt.zero_grad()
+        # l1 loss
+        # loss = F.l1_loss(noise_pred, noise) #
+        loss = F.mse_loss(noise_pred, noise) #
+        optimizer.zero_grad()
         loss.backward()
-        opt.step()
+        optimizer.step()
 
-        # Store the loss for later
-        losses.append(loss.item())
+        losses.append(loss.detach().item())
+        
+    print(f"Epoch {epoch}, Loss: {loss.item()}")
+    if epoch % config.save_image_epochs == 0:
+        pipeline = DDPMPipeline(unet=net, scheduler=noise_scheduler)
+        evaluate(config, epoch, pipeline, losses)
+        # evaluate2(net, noise_scheduler, config.eval_batch_size, epoch)
 
-    # monitoring the training process
-    every_epoch = 1
-    if epoch % every_epoch == 0:
-        print(f'Loss: {loss.item()}')
-        # save the monitoring figure
-        monitoring(losses, net, save_folder='monitor', epoch=epoch)
-
-
-    # Print our the average of the loss values for this epoch:
-    avg_loss = sum(losses[-len(train_dataloader):])/len(train_dataloader)
-    print(f'Finished epoch {epoch}. Average loss for this epoch: {avg_loss:05f}')
-
-
-
+        # save the model
+        model_dir = os.path.join("monitor")
+        os.makedirs(model_dir, exist_ok=True)
+        torch.save(net.state_dict(), os.path.join(model_dir, f"model_{epoch}.pt"))
 
 
 
